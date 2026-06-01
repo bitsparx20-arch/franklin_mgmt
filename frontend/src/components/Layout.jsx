@@ -94,7 +94,7 @@ export const Layout = () => {
         <SidebarContent user={user} />
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header */}
         <header className="h-16 border-b border-border/60 bg-background/80 backdrop-blur sticky top-0 z-30 flex items-center px-4 lg:px-8 gap-3">
           <Sheet open={open} onOpenChange={setOpen}>
@@ -157,7 +157,7 @@ export const Layout = () => {
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 p-4 md:p-6 lg:p-8 pb-24 md:pb-8">
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 lg:p-8 pb-24 md:pb-8">
           <Outlet context={{ refetchNotifs: loadNotifs }} />
         </main>
       </div>

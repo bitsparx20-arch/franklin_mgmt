@@ -1,7 +1,10 @@
 import axios from "axios";
 
-const BASE = process.env.REACT_APP_BACKEND_URL;
-export const API_BASE = `${BASE}/api`;
+// Dev: use relative /api (CRA proxy → backend). Set REACT_APP_BACKEND_URL only if not using proxy.
+const envBase = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
+const BASE =
+  process.env.NODE_ENV === "development" && !envBase ? "" : envBase;
+export const API_BASE = BASE ? `${BASE}/api` : "/api";
 
 const api = axios.create({
   baseURL: API_BASE,

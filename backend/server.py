@@ -1148,10 +1148,16 @@ async def root():
 
 app.include_router(api)
 
+_cors_env = os.environ.get("CORS_ORIGINS", "").strip()
+if _cors_env:
+    _cors_kw = {"allow_origins": [o.strip() for o in _cors_env.split(",") if o.strip()]}
+else:
+    # Local dev: allow any localhost port (3000, 3001, …)
+    _cors_kw = {"allow_origin_regex": r"https?://(localhost|127\.0\.0\.1)(:\d+)?"}
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    **_cors_kw,
 )
