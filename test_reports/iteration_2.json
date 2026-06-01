@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend e2e testing of Franklin Wardcorpp CRM completed against public REACT_APP_BACKEND_URL. All 15 requested feature flows verified end-to-end: demo CEO login -> /dashboard redirect; dashboard KPI strip (Visits/POCs/Pipeline/Revenue), pipeline-by-stage bar chart (2 recharts), conversion funnel, monthly revenue trend, top products list, leaflet map all render; all 10 sidebar nav items navigate without errors; Visits side-sheet creates TEST_AcmeCo (rows 1->2); POCs sheet creates new POC (cards 1->2); Follow-ups page loads (0 rows when none scheduled, log-action sheet opens when present); Pipeline shows 6 columns and 6 seeded deal cards; Products table shows 5 seeded products with Add sheet; Bills generate-bill computes subtotal/GST/total, saves (rows 2->3) and PDF downloads (FW-1780286111.pdf); Performance shows table+chart; Employees shows 5 cards + Add sheet; Reports shows all 4 cards with Excel+PDF buttons, Excel download verified (visits.xlsx); theme toggle switches dark<->light via documentElement.classList; salesperson role correctly HIDES Performance & Employees nav and ProtectedRoute redirects /performance->/dashboard; logout via profile menu redirects to /login.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard - Performance/Top-selling products area", "issues": ["When data is sparse (single product / 1 visit), Top-selling Products and 12-month trend look empty/under-utilized. Consider empty-state placeholders for first-time experience."]},
+      {"screen": "Reports page", "issues": ["Only 4 report cards on a wide screen leaves a lot of whitespace below; consider a 4th-col layout or grouping by category."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/iteration_1.json"
+  ],
+  "action_items": [
+    "Pipeline drag-drop between columns: not exercised via playwright because @dnd-kit requires precise pointer events that are flaky to simulate; the underlying PATCH /api/deals/{id} stage update is already covered by backend tests (iteration 1). Recommend a manual smoke or a dedicated playwright pointer-event harness if regression coverage is required.",
+    "Carry forward RBAC scope gaps from iteration 1 (PATCH/DELETE /api/deals/{id} and GET /api/users/{user_id} lack actor-scope checks). Not exposed by current UI but should be fixed server-side."
+  ],
+  "critical_code_review_comments": [
+    "Frontend: AuthContext stores Bearer token in localStorage (fw_token) - acceptable for this app, but backend also issues httpOnly access_token cookie; double-token model is fine but ensure /logout clears both (verified working).",
+    "Layout.jsx role gating uses array.includes on n.roles - consistent with backend RBAC; redirects via ProtectedRoute confirmed (sales user hitting /performance lands on /dashboard).",
+    "Bills GST math is computed client-side AND server-side; verify both produce identical totals to avoid edge-case mismatches (not blocking - quick check during PDF showed values match).",
+    "Reports.jsx uses jsPDF + SheetJS bundled with the SPA - bundle size could be heavy; consider lazy-loading these libs only when the user clicks export.",
+    "data-testid coverage is excellent (every interactive control tagged) - retain this pattern for future modules."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (from iteration 1)", "frontend": "100% on tested flows"},
+  "test_credentials": "Used seeded creds ceo@franklinwardcorpp.com / ceo12345 and sales1@franklinwardcorpp.com / sales123 (via demo buttons). Both authenticated successfully.",
+  "seed_data_creation": "Created via UI: 1 TEST_AcmeCo visit, 1 TEST_PocClient POC, 1 TEST_BillCli bill. Theme persisted to dark after test (toggled in CEO session). No cleanup performed for these UI-created records; tagged TEST_ for easy identification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend is fully green on the 15 requested flows. Only un-tested item is pipeline drag-and-drop pointer event (covered by backend stage PATCH tests). Theme is now persisted to dark from CEO session - reset via toggle if light is needed. data-testid map: demo-{role}-btn, login-{email|password|submit}-btn, nav-{module}, new-{visit|poc|deal|bill|product|emp}-btn, {entity}-row-{id} / {entity}-card-{id}, report-{key} + report-{excel|pdf}-{key}, profile-menu-btn -> logout-btn (radix portal, visible after open).",
+  "rca_of_the_issue": "N/A - no functional failures. One transient playwright timeout for logout-btn occurred earlier when a Reports toast overlay was still present; retest with fresh navigation succeeded immediately."
+}

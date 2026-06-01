@@ -1,0 +1,43 @@
+{
+  "summary": "Backend regression suite executed against external REACT_APP_BACKEND_URL for Franklin Wardcorpp CRM. 49/49 pytest tests passed covering auth (5 roles, Bearer + cookie), users + role hierarchy, visits (scope + GPS), POCs, follow-ups + overdue flag + escalation (manager+), deals/kanban (stage filters + touchpoints + WON notification), products (RBAC), bills (GST + discount needs_approval), dashboard (overview/performance/funnel/agent-locations/top-products), notifications (list/mark-read/mark-all-read), and reports (visits/bills/pipeline/pocs). SpringEdge SMS/WhatsApp confirmed mocked (logs only).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Consider: CORSMiddleware uses allow_origins=['*'] with allow_credentials=True - browsers reject this combination. If frontend ever needs to send cookies cross-origin, switch to explicit origins from CORS_ORIGINS env.",
+    "Consider: No brute-force lockout after N failed logins (playbook recommends 5). Not blocking but a hardening gap.",
+    "Consider: salesperson can DELETE /api/deals/{id} for any deal (no scope check inside delete_deal). Currently passes because tests don't exercise cross-user deletes, but a salesperson could delete another's deal if they guess the id.",
+    "Consider: PATCH /api/deals/{id} has no salesperson scope check either - same risk as above.",
+    "Consider: GET /api/users/{user_id} returns any user regardless of actor role/scope (no hierarchy check)."
+  ],
+  "critical_code_review_comments": [
+    "RBAC scope gap: update_deal / delete_deal / get_user have no actor-scope enforcement; only list endpoints are scoped. A salesperson with a known UUID could mutate/delete another user's deal.",
+    "CORS misconfig: allow_origins=['*'] with allow_credentials=True is non-spec-compliant; CORS_ORIGINS env value is read but unused.",
+    "scoped_user_filter only handles 'salesperson' - sales_manager is treated identically to ceo/admin for visits/pocs/deals/bills (sees ALL data). Likely unintended; manager should see only their direct reports' records.",
+    "Monthly-revenue bucket uses (today - 30*i days) which drifts on month boundaries; could be replaced with proper month math.",
+    "server.py is 883 lines (>700) - consider splitting into routers (auth/users/visits/deals/bills/dashboard) for maintainability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "not tested (skipped per request)"
+  },
+  "test_credentials": "Used seeded creds from /app/memory/test_credentials.md (ceo/admin/manager/sales1/sales2). All login successful, bcrypt hashes verified, httpOnly cookie 'access_token' set on login.",
+  "seed_data_creation": "Tests created TEST_-prefixed users (deleted in cleanup), 1 TEST visit, 1 TEST POC, 2 TEST followups, 1 TEST deal (moved to WON), 1 TEST product (deleted), 2 TEST bills. Some TEST data remains in collections (visits/pocs/followups/deals/bills) but is clearly tagged with TEST_ prefix.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend is fully green. Full pytest suite at /app/backend/tests/backend_test.py can be re-run with: pytest /app/backend/tests/backend_test.py -v. Frontend not yet tested. Note the RBAC scope gaps in mutate-by-id endpoints (PATCH/DELETE deals, GET user-by-id) - not exercised here but worth covering when fixed. SpringEdge writes to db.sms_logs (MOCKED_SENT).",
+  "rca_of_the_issue": "N/A - no failures."
+}

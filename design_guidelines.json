@@ -1,0 +1,133 @@
+{
+  "theme": "hybrid (dark/light toggle)",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_philosophy": "Objective, rigid, function-first. High-density, scan-optimized modular boards. UI relies on grayscale structural dominance, allowing functional colors (Green/Amber/Red) to act as pure signal for the sales pipeline and performance metrics.",
+  "colors": {
+    "light": {
+      "background": "#FAFAFA",
+      "foreground": "#09090B",
+      "card": "#FFFFFF",
+      "card_foreground": "#09090B",
+      "border": "#E4E4E7",
+      "input": "#E4E4E7",
+      "primary": "#09090B",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#F4F4F5",
+      "secondary_foreground": "#18181B",
+      "accent": "#FF5400",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#F4F4F5",
+      "muted_foreground": "#71717A"
+    },
+    "dark": {
+      "background": "#09090B",
+      "foreground": "#FAFAFA",
+      "card": "#18181B",
+      "card_foreground": "#FAFAFA",
+      "border": "#27272A",
+      "input": "#27272A",
+      "primary": "#FAFAFA",
+      "primary_foreground": "#09090B",
+      "secondary": "#27272A",
+      "secondary_foreground": "#FAFAFA",
+      "accent": "#FF5400",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#1F1F22",
+      "muted_foreground": "#A1A1AA"
+    },
+    "functional": {
+      "pipeline_cold_lead": "#A1A1AA",
+      "pipeline_contacted": "#3B82F6",
+      "pipeline_interested": "#F59E0B",
+      "pipeline_negotiation": "#FF5400",
+      "pipeline_won": "#00C853",
+      "pipeline_lost": "#D50000",
+      "target_met": "#00C853",
+      "target_warning": "#FFAB00",
+      "target_missed": "#D50000"
+    }
+  },
+  "typography": {
+    "heading_font": "Chivo, sans-serif",
+    "body_font": "IBM Plex Sans, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "scales": {
+      "h1": "text-4xl tracking-tighter font-black",
+      "h2": "text-2xl tracking-tight font-bold",
+      "h3": "text-xl tracking-tight font-bold",
+      "body": "text-sm leading-relaxed",
+      "data_large": "text-3xl font-mono tracking-tighter",
+      "overline": "text-xs uppercase tracking-[0.2em] font-bold"
+    }
+  },
+  "spacing_scale": {
+    "container": "p-6 md:p-8",
+    "bento_gap": "gap-4 md:gap-6",
+    "kanban_gap": "gap-4",
+    "card_padding": "p-4 md:p-6"
+  },
+  "components": {
+    "kanban_board": {
+      "structure": "Modular, scan-first horizontal scrolling container with fixed-width columns (w-80 or w-96).",
+      "column_header": "Solid border-b border-border/40, uppercase overline typography, dynamic count badge.",
+      "card": "Draggable. bg-card, 1px solid border-border, no drop shadow. modified F-pattern layout. Left border strip indicates pipeline stage color.",
+      "card_content": "Deal name (Chivo, bold) at top. Metric/Value (JetBrains Mono) on right. Status/Date pill at bottom."
+    },
+    "dashboard_stats": {
+      "style": "Bento-grid 'Control Room' protocol.",
+      "visuals": "Cardless or 1px border. High-contrast typography. Use JetBrains Mono for all KPIs. Color-coded delta arrows (Green/Red)."
+    },
+    "sidebar": {
+      "style": "Strict, clean. border-r border-border/40. Monochromatic active states (bg-muted) instead of heavy color washes. Role-aware sections."
+    },
+    "data_tables": {
+      "style": "Dense, grid-lines visible (border-b on rows, optional border-r for column definition). tabular-nums for numerical columns."
+    },
+    "modal_forms": {
+      "style": "Right-side slide-over sheet (Shadcn Sheet) preferred for data entry (Visit Log, Follow-up, Product CRUD) to maintain context without losing dashboard view."
+    },
+    "charts": {
+      "library": "recharts via Shadcn",
+      "styling": "No background grids. Monochromatic or two-tone bars. Minimal tooltips."
+    }
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "instructions": "Use 'regular' weight for UI, 'fill' for active states."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1600540984005-c7f3a641fbe5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwyfHxnZW9tZXRyaWMlMjBjb3Jwb3JhdGUlMjBsb2dvJTIwY2xlYW58ZW58MHx8fHwxNzgwMjg0Nzc3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Geometric clean logo placeholder",
+        "category": "logo"
+      },
+      {
+        "url": "https://images.pexels.com/photos/7230895/pexels-photo-7230895.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Abstract dark architectural lines background for Login screen",
+        "category": "login_background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc4MDI4NDc3N3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Professional headshot portrait (Manager/CEO)",
+        "category": "avatar_1"
+      },
+      {
+        "url": "https://images.pexels.com/photos/26872232/pexels-photo-26872232.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Professional headshot portrait (Salesperson)",
+        "category": "avatar_2"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: Apply 'data-testid' to ALL interactive elements (e.g., data-testid='kanban-drag-card', data-testid='sidebar-nav-item', data-testid='login-submit-button').",
+    "CRITICAL: Build using pure HTML+Tailwind for layout shells, heavily modifying Shadcn UI for interactive components. Avoid generic Vercel look.",
+    "Kanban Implementation: Use a horizontal scrolling flex container. Use standard HTML Drag and Drop API or a lightweight library (e.g., dnd-kit). Ensure columns have 'min-h-[500px]' so empty states still accept drops.",
+    "Typography Enforcement: Apply 'font-sans' (IBM Plex Sans) globally, use 'font-heading' (Chivo) for all h1-h4, and 'font-mono' (JetBrains Mono) for ALL numerical data points and KPIs.",
+    "Color Constraints: Never use colored text on colored backgrounds unless using the specific functional colors. Default to grayscale UI with functional color accents. DO NOT use teal or purple anywhere.",
+    "Mocked Integrations: Explicitly MOCK SpringEdge SMS/WhatsApp integrations using Sonner Toasts that say 'MOCKED SMS Sent to [Number]'. Use jsPDF and SheetJS for exporting features.",
+    "Mobile Responsive: The Visit Log Form, Dashboard, and Pipelines MUST degrade elegantly to a single column mobile view for field salespeople. Sidebar must convert to a hamburger/Sheet on mobile.",
+    "Map View: Implement a mocked or basic Leaflet map for the 'live agent map' feature on the CEO dashboard.",
+    "Notifications: Use 'sonner' library for all in-app toasts."
+  ]
+}

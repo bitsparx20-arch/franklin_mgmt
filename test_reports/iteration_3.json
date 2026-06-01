@@ -1,0 +1,67 @@
+{
+  "summary": "Iteration 3 — Validated 5 enhancements: CEO AI chatbot (Claude Sonnet 4.5), full agent map, ping-location, beautified Invoice PDF, executive overview PDF, mobile responsive. 8/9 new backend tests pass (1 functional bug: ping not overriding visit). Frontend flows largely pass; AI FAB role-gating, map markers (3/3), overview PDF download, bill PDF download, mobile menu + Visits card layout all verified.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/users/me/ping-location + GET /api/dashboard/agent-locations",
+        "issue": "After salesperson pings new location (28.6, 77.1), agent-locations returns source='visit' with old coords instead of source='ping' with new coords. Visit GPS takes hard precedence over ping — but spec requires ping to be reflected for live tracking. Fix: use the most recent of last_visit_with_gps_at vs last_ping_at to select source; ping should win when newer than last visit GPS.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Dashboard map Legend",
+        "issue": "Legend element lacks data-testid='map-legend' (testid requested by spec). Items render correctly with text 'Last visit GPS / Live ping / Area default' but cannot be queried by testid.",
+        "selector": "[data-testid='map-legend']",
+        "priority": "LOW"
+      },
+      {
+        "component": "Sidebar nav links",
+        "issue": "Both desktop sidebar and mobile drawer render the SAME data-testid (e.g. 'nav-visits') simultaneously on mobile viewport, causing strict-mode selector ambiguity. Suggest suffix like 'nav-visits-desktop' / 'nav-visits-mobile' or hide desktop nav off-DOM on mobile.",
+        "selector": "[data-testid='nav-visits']",
+        "priority": "LOW"
+      },
+      {
+        "component": "Visits page on mobile",
+        "issue": "Both 'visit-card-*' (mobile cards) and 'visit-row-*' (desktop rows) render at 390px viewport (4 cards + 4 rows). Desktop table should be visually hidden on mobile only.",
+        "selector": "[data-testid^='visit-row-']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_enhancements.py",
+    "/app/test_reports/pytest/iter3_enhancements.xml",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "action_items": [
+    "Backend (HIGH): /api/dashboard/agent-locations must use most-recent timestamp logic so that ping overrides older visit GPS (currently visit GPS always wins). Spec explicitly requires source='ping' after a fresh ping.",
+    "Frontend (LOW): Add data-testid='map-legend' to the Legend wrapper on Dashboard.",
+    "Frontend (LOW): Disambiguate nav testids for mobile vs desktop OR unmount desktop nav at mobile breakpoint (currently duplicate testids exist).",
+    "Frontend (LOW): Ensure visit-row rows are NOT rendered (not just hidden) at mobile breakpoint — saves DOM and avoids testid duplication."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1120+ lines — consider splitting (routers/ai.py, routers/dashboard.py, routers/reports.py).",
+    "agent-locations source precedence is hard-coded (visit > ping > default). Should be timestamp-based to keep live ping useful.",
+    "AIChat.jsx: messages are local-only state; reopening the sheet shows quick prompts even if server has history. Consider loading the most recent session on open for continuity.",
+    "Some testids embed dynamic text (e.g., `ai-prompt-${p.slice(0,10)}`) containing spaces — works but fragile. Prefer indexed testids ('ai-prompt-0', 'ai-prompt-1')."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_enhancements.py"
+  ],
+  "success_rate": {
+    "backend": "89% (8/9 new tests + all prior endpoints)",
+    "frontend": "90% (all critical flows pass; minor testid/legend issues)"
+  },
+  "test_credentials": "CEO ceo@franklinwardcorpp.com/ceo12345, Admin admin@franklinwardcorpp.com/admin123, Manager manager@franklinwardcorpp.com/manager123, Sales sales1@franklinwardcorpp.com/sales123",
+  "seed_data_creation": "None added in this iteration. Existing seed (4 users, 5 products, 5 deals) used. Earlier iterations created TEST_ prefixed visits/bills which still exist.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "AI chatbot is fully working (real Claude Sonnet 4.5 via Emergent key; ~3-8s latency). All AI backend endpoints pass (ask, sessions list, session messages, salesperson 403). Overview report PDF generates filename 'franklin_overview_<ts>.pdf'. Bill PDF generates 'FW-<ts>.pdf'. Mobile menu testid='mobile-menu-btn' works at 390x844; visits page renders cards on mobile but ALSO renders desktop rows (duplicate). Map renders 3 markers (2 sp + 1 sales_manager) for CEO/admin. AI FAB hidden for salesperson role (correct gating). Single critical bug: ping-location source field stays 'visit' instead of switching to 'ping'.",
+  "rca_of_the_issue": "Ping bug RCA: In /api/dashboard/agent-locations endpoint (server.py around L812), the implementation checks last visit with GPS first and only falls back to ping if no visit exists. Because sales1 has prior visits with GPS (Bharat Fab Co at 28.6,77.2), the visit branch always returns first. Fix: compare last_visit_gps_at vs last_ping_at and pick the newer one to determine the source/coords. Reproduction: POST /api/users/me/ping-location with sales1 token → GET /api/dashboard/agent-locations with CEO token → sales1 entry shows source='visit' not 'ping'."
+}
