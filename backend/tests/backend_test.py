@@ -17,8 +17,8 @@ CREDS = {
     "ceo":     ("ceo@franklinwardcorpp.com",     "ceo12345"),
     "admin":   ("admin@franklinwardcorpp.com",   "admin123"),
     "manager": ("manager@franklinwardcorpp.com", "manager123"),
-    "sales1":  ("sales1@franklinwardcorpp.com",  "sales123"),
-    "sales2":  ("sales2@franklinwardcorpp.com",  "sales123"),
+    "sales1":  ("swapnil@franklinwardcorpp.com",  "sales123"),
+    "sales2":  ("chirodeep@franklinwardcorpp.com",  "sales123"),
 }
 
 # ----------- helpers -------------

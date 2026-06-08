@@ -24,7 +24,7 @@ async def seed_whatsapp_samples(db) -> dict[str, Any]:
     """
     test_phone = (os.environ.get("SPRINGEDGE_TEST_PHONE") or "").strip()
 
-    sp = await db.users.find_one({"email": "sales1@franklinwardcorpp.com"})
+    sp = await db.users.find_one({"email": "swapnil@franklinwardcorpp.com"})
     if not sp:
         sp = await db.users.find_one({"role": "salesperson"})
     if not sp:
@@ -115,5 +115,5 @@ async def seed_whatsapp_samples(db) -> dict[str, Any]:
         "test_phone": primary_phone,
         "pocs": len(pocs),
         "followups": len(followups),
-        "hint": "Login as sales1@franklinwardcorpp.com, open Follow-ups, Log action, choose WhatsApp Sent",
+        "hint": "Login as swapnil@franklinwardcorpp.com, open Follow-ups, Log action, choose WhatsApp Sent",
     }

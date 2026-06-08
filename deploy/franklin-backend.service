@@ -1,0 +1,16 @@
+[Unit]
+Description=Franklin Wardcorpp CRM API (FastAPI/Uvicorn)
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/franklin-crm/backend
+EnvironmentFile=/opt/franklin-crm/backend/.env
+ExecStart=/opt/franklin-crm/backend/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

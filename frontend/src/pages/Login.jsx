@@ -9,10 +9,13 @@ import { Toaster } from "../components/ui/sonner";
 import { ArrowRight, Lightning } from "@phosphor-icons/react";
 
 const DEMO = [
-  { role: "CEO", email: "ceo@franklinwardcorpp.com", pw: "ceo12345" },
-  { role: "Admin", email: "admin@franklinwardcorpp.com", pw: "admin123" },
-  { role: "Manager", email: "manager@franklinwardcorpp.com", pw: "manager123" },
-  { role: "Sales", email: "sales1@franklinwardcorpp.com", pw: "sales123" },
+  { role: "CEO (Vivek)", email: "ceo@franklinwardcorpp.com", pw: "ceo12345" },
+  { role: "CEO (OM)", email: "om.wadhwa@franklinwardcorpp.com", pw: "ceo12345" },
+  { role: "National Head", email: "manager@franklinwardcorpp.com", pw: "manager123" },
+  { role: "South (Swapnil)", email: "swapnil@franklinwardcorpp.com", pw: "sales123" },
+  { role: "East (ChiroDeep)", email: "chirodeep@franklinwardcorpp.com", pw: "sales123" },
+  { role: "North (Manish)", email: "manish@franklinwardcorpp.com", pw: "sales123" },
+  { role: "West (Thomas)", email: "thomas.philip@franklinwardcorpp.com", pw: "sales123" },
 ];
 
 export default function Login() {
@@ -145,7 +148,7 @@ export default function Login() {
 
             <div className="login-demo mt-5 border-t border-border pt-5 sm:mt-6 sm:pt-6">
               <div className="overline mb-2 sm:mb-3">Demo accounts</div>
-              <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2 lg:grid-cols-3">
                 {DEMO.map((d) => (
                   <button
                     key={d.email}

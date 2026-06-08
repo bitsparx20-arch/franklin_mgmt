@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, CartesianGrid,
   PieChart, Pie, Cell,
 } from "recharts";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap, ZoomControl } from "react-leaflet";
 import L from "leaflet";
 import { Trophy, TrendUp, Users, Receipt as ReceiptIcon, ChartLineUp, MapTrifold, Crosshair } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -21,17 +21,45 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-// Colored DivIcons per agent status
+const MARKER_STYLES = {
+  visit: {
+    bg: "linear-gradient(145deg, #34d399, #059669)",
+    glow: "rgba(16, 185, 129, 0.45)",
+    ring: "rgba(16, 185, 129, 0.55)",
+  },
+  ping: {
+    bg: "linear-gradient(145deg, #60a5fa, #2563eb)",
+    glow: "rgba(59, 130, 246, 0.5)",
+    ring: "rgba(59, 130, 246, 0.6)",
+  },
+  default: {
+    bg: "linear-gradient(145deg, #e4e4e7, #71717a)",
+    glow: "rgba(161, 161, 170, 0.35)",
+    ring: "rgba(161, 161, 170, 0.4)",
+  },
+};
+
 const agentIcon = (source, role) => {
-  const color = source === "visit" ? "#10b981" : source === "ping" ? "#3b82f6" : "#a1a1aa";
-  const ring = role === "sales_manager" ? "#ff5400" : "transparent";
+  const key = source === "visit" ? "visit" : source === "ping" ? "ping" : "default";
+  const { bg, glow, ring } = MARKER_STYLES[key];
+  const isLive = source === "ping";
+  const isManager = role === "sales_manager";
   return L.divIcon({
-    className: "",
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    html: `<div style="width:24px;height:24px;border-radius:50%;background:${color};border:3px solid ${ring === 'transparent' ? '#ffffff' : ring};box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:bold;font-family:JetBrains Mono">${role === 'sales_manager' ? 'M' : '·'}</div>`,
+    className: "agent-marker-wrap",
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    html: `
+      <div class="agent-marker${isLive ? " agent-marker--live" : ""}" style="--marker-bg:${bg};--marker-glow:${glow}">
+        ${isLive ? `<span class="agent-marker-ring" style="--ring-color:${ring}"></span>` : ""}
+        <span class="agent-marker-dot"></span>
+        ${isManager ? '<span class="agent-marker-badge">M</span>' : ""}
+      </div>
+    `,
   });
 };
+
+const SOURCE_LABELS = { visit: "Last visit GPS", ping: "Live ping", default: "Area default" };
+const SOURCE_COLORS = { visit: "#10b981", ping: "#3b82f6", default: "#a1a1aa" };
 
 function FitBounds({ points }) {
   const map = useMap();
@@ -49,6 +77,7 @@ export default function Dashboard() {
   const [perf, setPerf] = useState([]);
   const [funnel, setFunnel] = useState(null);
   const [agents, setAgents] = useState([]);
+  const [pinging, setPinging] = useState(false);
   const [topProducts, setTopProducts] = useState([]);
 
   const load = async () => {
@@ -231,40 +260,54 @@ export default function Dashboard() {
 
       {/* Live agent map */}
       {["ceo","admin","sales_manager"].includes(user.role) && (
-        <div className="border border-border rounded-md bg-card overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
+        <div className="border border-border rounded-lg bg-card overflow-hidden shadow-sm">
+          <div className="p-4 md:p-5 border-b border-border flex items-center justify-between flex-wrap gap-3 bg-gradient-to-r from-card via-card to-muted/30">
             <div>
-              <div className="overline">Field signals</div>
-              <h3 className="font-heading font-bold text-lg mt-0.5 flex items-center gap-2">
-                <MapTrifold size={18} /> Live agent map
+              <div className="overline flex items-center gap-2">
+                <span className="map-live-indicator inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Field signals
+              </div>
+              <h3 className="font-heading font-bold text-xl mt-1 flex items-center gap-2">
+                <MapTrifold size={20} weight="duotone" className="text-[hsl(var(--accent))]" />
+                Live agent map
               </h3>
             </div>
-            <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-muted-foreground" data-testid="map-legend">
+            <div className="flex items-center gap-2 flex-wrap" data-testid="map-legend">
               <Legend color="#10b981" label="Last visit GPS" />
-              <Legend color="#3b82f6" label="Live ping" />
+              <Legend color="#3b82f6" label="Live ping" pulse />
               <Legend color="#a1a1aa" label="Area default" />
-              <span className="font-mono">{agents.length} agents</span>
+              <span className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Users size={12} weight="bold" />
+                <span className="font-mono font-bold text-foreground">{agents.length}</span> agents
+              </span>
             </div>
           </div>
-          <div style={{ height: 420 }}>
-            <MapContainer center={[22.5, 78.9]} zoom={5} style={{ height: "100%", width: "100%" }} scrollWheelZoom={false}>
-              <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <div className="relative agent-map" style={{ height: 460 }}>
+            <MapContainer
+              center={[22.5, 78.9]}
+              zoom={5}
+              style={{ height: "100%", width: "100%" }}
+              scrollWheelZoom={false}
+              zoomControl={false}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+              />
+              <ZoomControl position="topright" />
               {agents.map((a) => (
                 <Marker key={a.salesperson_id} position={[a.lat, a.lng]} icon={agentIcon(a.source, a.role)}>
-                  <Popup>
-                    <div className="font-semibold text-sm">{a.name}</div>
-                    <div className="text-[11px] text-zinc-500 capitalize">{a.role?.replace("_", " ")} · {a.area}</div>
-                    <div className="text-[11px] mt-1">📍 {a.client}</div>
-                    {a.last_seen && <div className="text-[10px] font-mono text-zinc-400">@ {new Date(a.last_seen).toLocaleString()}</div>}
-                    {a.phone && <div className="text-[10px] font-mono">{a.phone}</div>}
+                  <Popup className="agent-popup" closeButton={false}>
+                    <AgentPopup agent={a} />
                   </Popup>
                 </Marker>
               ))}
               <FitBounds points={agents} />
             </MapContainer>
+            <div className="agent-map-vignette absolute inset-0" aria-hidden="true" />
           </div>
           {agents.length === 0 && (
-            <div className="p-4 text-xs text-muted-foreground text-center">No agents in scope yet.</div>
+            <div className="p-4 text-xs text-muted-foreground text-center border-t border-border">No agents in scope yet.</div>
           )}
         </div>
       )}
@@ -279,20 +322,28 @@ export default function Dashboard() {
           </div>
           <Button
             data-testid="ping-location-btn"
+            disabled={pinging}
             onClick={() => {
+              if (pinging) return;
               if (!navigator.geolocation) return toast.error("Geolocation not supported");
+              setPinging(true);
               navigator.geolocation.getCurrentPosition(
                 async (pos) => {
                   try {
                     await api.post("/users/me/ping-location", { lat: pos.coords.latitude, lng: pos.coords.longitude });
                     toast.success("Location pinged");
                   } catch { toast.error("Failed to broadcast"); }
+                  finally { setPinging(false); }
                 },
-                () => toast.error("GPS permission denied")
+                () => {
+                  toast.error("GPS permission denied");
+                  setPinging(false);
+                }
               );
             }}
           >
-            <Crosshair size={16} className="mr-1.5" weight="bold" /> Broadcast GPS now
+            <Crosshair size={16} className="mr-1.5" weight="bold" />
+            {pinging ? "Broadcasting…" : "Broadcast GPS now"}
           </Button>
         </div>
       )}
@@ -300,9 +351,47 @@ export default function Dashboard() {
   );
 }
 
-const Legend = ({ color, label }) => (
-  <span className="inline-flex items-center gap-1.5">
-    <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+const Legend = ({ color, label, pulse }) => (
+  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/80 px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground shadow-sm">
+    <span className="relative flex h-2.5 w-2.5">
+      {pulse && (
+        <span
+          className="absolute inset-0 rounded-full animate-ping opacity-40"
+          style={{ background: color }}
+        />
+      )}
+      <span className="relative h-2.5 w-2.5 rounded-full ring-2 ring-white/80" style={{ background: color }} />
+    </span>
     {label}
   </span>
 );
+
+const AgentPopup = ({ agent }) => {
+  const sourceKey = agent.source === "visit" ? "visit" : agent.source === "ping" ? "ping" : "default";
+  const accent = SOURCE_COLORS[sourceKey];
+  return (
+    <div className="text-left">
+      <div className="px-3 py-2.5 border-b border-border/60" style={{ background: `linear-gradient(135deg, ${accent}18, transparent)` }}>
+        <div className="font-heading font-bold text-sm leading-tight">{agent.name}</div>
+        <div className="text-[10px] uppercase tracking-wider mt-1 capitalize text-muted-foreground">
+          {agent.role?.replace("_", " ")} · {agent.area}
+        </div>
+      </div>
+      <div className="px-3 py-2.5 space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: accent }} />
+          <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: accent }}>
+            {SOURCE_LABELS[sourceKey]}
+          </span>
+        </div>
+        {agent.client && <div className="text-xs text-foreground/80">{agent.client}</div>}
+        {agent.last_seen && (
+          <div className="text-[10px] font-mono text-muted-foreground">
+            {new Date(agent.last_seen).toLocaleString()}
+          </div>
+        )}
+        {agent.phone && <div className="text-[10px] font-mono text-muted-foreground">{agent.phone}</div>}
+      </div>
+    </div>
+  );
+};

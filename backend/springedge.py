@@ -13,6 +13,11 @@ import requests
 logger = logging.getLogger("springedge")
 
 API_KEY = os.environ.get("SPRINGEDGE_API_KEY", "").strip()
+WABA_API_KEY = (os.environ.get("SPRINGEDGE_WABA_API_KEY") or API_KEY).strip()
+PHONE_NUMBER_ID = os.environ.get("SPRINGEDGE_PHONE_NUMBER_ID", "").strip()
+WHATSAPP_API_BASE = os.environ.get(
+    "SPRINGEDGE_WHATSAPP_API_URL", "https://partnersv1.pinbot.ai/v3"
+).strip()
 SENDER_ID = os.environ.get("SPRINGEDGE_SENDER_ID", "SPREDG").strip()
 # Legacy API (resolves via web.springedge.com) — use this by default
 LEGACY_SMS_URL = os.environ.get(
@@ -22,13 +27,65 @@ LEGACY_SMS_URL = os.environ.get(
 SMS_URL = os.environ.get("SPRINGEDGE_SMS_URL", "").strip()
 WHATSAPP_URL = os.environ.get("SPRINGEDGE_WHATSAPP_URL", "").strip()
 WHATSAPP_TEMPLATE = os.environ.get("SPRINGEDGE_WHATSAPP_TEMPLATE", "").strip()
+WHATSAPP_TEMPLATE_LANG = os.environ.get("SPRINGEDGE_WHATSAPP_TEMPLATE_LANG", "en").strip()
 WHATSAPP_PARAM_KEY = os.environ.get("SPRINGEDGE_WHATSAPP_PARAM_KEY", "message").strip()
+WHATSAPP_TEXT_FALLBACK = os.environ.get("SPRINGEDGE_WHATSAPP_TEXT_FALLBACK", "true").lower() in (
+    "1", "true", "yes",
+)
+WHATSAPP_TEXT_ONLY = os.environ.get("SPRINGEDGE_WHATSAPP_TEXT_ONLY", "false").lower() in (
+    "1", "true", "yes",
+)
 API_STYLE = os.environ.get("SPRINGEDGE_API_STYLE", "legacy").strip().lower()
 FORCE_MOCK = os.environ.get("SPRINGEDGE_MOCK", "false").lower() in ("1", "true", "yes")
 
 
 def is_configured() -> bool:
     return bool(API_KEY) and not FORCE_MOCK
+
+
+def whatsapp_configured() -> bool:
+    """PinBot / SpringEdge WhatsApp Business API (see WhatsApp_API_Pinned_Documentation.pdf)."""
+    return bool(WABA_API_KEY and PHONE_NUMBER_ID) and not FORCE_MOCK
+
+
+def status_detail() -> dict[str, Any]:
+    return {
+        "sms_configured": is_configured(),
+        "whatsapp_configured": whatsapp_configured(),
+        "mock_mode": FORCE_MOCK or not API_KEY,
+        "sender_id": SENDER_ID or None,
+        "phone_number_id": PHONE_NUMBER_ID or None,
+        "whatsapp_api": WHATSAPP_API_BASE if whatsapp_configured() else None,
+        "whatsapp_template": WHATSAPP_TEMPLATE or None,
+        "whatsapp_template_lang": WHATSAPP_TEMPLATE_LANG or None,
+        "whatsapp_text_fallback": WHATSAPP_TEXT_FALLBACK,
+        "whatsapp_text_only": WHATSAPP_TEXT_ONLY,
+        "whatsapp_template_params": ["notification_alert", "msg_body"],
+        "whatsapp_doc": "WhatsApp_API_Pinned_Documentation.pdf",
+        "pinbot_endpoints": {
+            "messages": f"{WHATSAPP_API_BASE.rstrip('/')}/{PHONE_NUMBER_ID}/messages" if whatsapp_configured() else None,
+            "getuserdetails": f"{WHATSAPP_API_BASE.rstrip('/')}/getuserdetails" if whatsapp_configured() else None,
+        },
+    }
+
+
+def sanitize_template_text(text: str, *, max_len: int = 450) -> str:
+    """Strip chars that trigger Meta template error 135000; keep message readable."""
+    s = (text or "").strip()
+    replacements = {
+        "₹": "Rs.",
+        "—": "-",
+        "→": "->",
+        "•": "-",
+        "\n": " ",
+        "\r": " ",
+        "\t": " ",
+    }
+    for old, new in replacements.items():
+        s = s.replace(old, new)
+    s = re.sub(r"[^\x20-\x7E]", "", s)
+    s = re.sub(r" {2,}", " ", s).strip()
+    return s[:max_len]
 
 
 def normalize_phone(phone: str) -> str:
@@ -69,9 +126,42 @@ def _friendly_error(exc: Exception) -> str:
         return "SpringEdge host unreachable. Check internet/DNS."
     if "403" in msg or "Invalid API Key" in msg or "INVALID_API_KEY" in msg:
         return "SpringEdge rejected the API key. Copy it from dashboard Settings > API."
+    if "135000" in msg:
+        return (
+            "WhatsApp template blocked by Meta (error 135000). "
+            "Recreate lms_notification in PinBot/Meta, or use text fallback."
+        )
     if "422" in msg or "sender" in msg.lower() or "template" in msg.lower():
         return f"SpringEdge rejected the request: {msg[:200]}"
     return msg[:300]
+
+
+def format_lms_notification_body(alert: str, msg: str) -> str:
+    """
+    lms_notification (English, Utility):
+      Header (fixed): lms notification
+      Body: Notification Alert: {{1}} / Msg: {{2}} / Thanks, LMS Tech Team
+    Used for WhatsApp text fallback when Meta returns template error 135000.
+    """
+    a = sanitize_template_text(alert or "Franklin Wardcorpp Alert", max_len=200)
+    m = sanitize_template_text(msg or "", max_len=450)
+    return (
+        "*lms notification*\n\n"
+        f"Notification Alert: {a}\n"
+        f"Msg: {m}\n"
+        "Thanks, LMS Tech Team"
+    )
+
+
+def _whatsapp_text_from_template_params(params: list[str] | None, message: str) -> str:
+    alert = (params[0] if params else "") or "Franklin Wardcorpp Alert"
+    body = (params[1] if params and len(params) > 1 else message) or message
+    return format_lms_notification_body(alert, body)
+
+
+def _is_template_send_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return any(code in msg for code in ("135000", "132000", "132001", "131058"))
 
 
 def _parse_legacy_response(resp: requests.Response) -> dict:
@@ -191,35 +281,134 @@ async def send_sms(to: str, message: str, msg_type: str = "transactional") -> di
         raise RuntimeError(_friendly_error(e)) from e
 
 
-async def send_whatsapp(to: str, message: str) -> dict[str, Any]:
+def _pinbot_cfg() -> dict[str, str]:
+    return {
+        "api_base": WHATSAPP_API_BASE,
+        "phone_number_id": PHONE_NUMBER_ID,
+        "api_key": WABA_API_KEY,
+    }
+
+
+async def send_whatsapp(
+    to: str,
+    message: str,
+    *,
+    template_name: str = "",
+    template_params: list[str] | None = None,
+    event_type: str | None = None,
+) -> dict[str, Any]:
+    """PinBot v3 — template §8, text §1 (WhatsApp_API_Pinned_Documentation.pdf)."""
+    from pinbot_whatsapp import send_template, send_text
+
     phone = normalize_phone(to)
     if not phone:
         return {"status": "skipped", "reason": "invalid_phone", "to": to}
 
-    if not is_configured():
+    if not is_configured() and not whatsapp_configured():
         logger.info("[SpringEdge mock WhatsApp] %s: %s", phone, message[:120])
         return {"status": "mocked", "channel": "whatsapp", "to": phone, "message": message}
 
-    # Native WhatsApp REST (api.springedge.com) is often unreachable — deliver via SMS
-    prefix = f"[WhatsApp · {WHATSAPP_TEMPLATE}] " if WHATSAPP_TEMPLATE else "[WhatsApp follow-up] "
-    body = f"{prefix}{message}"
+    if not whatsapp_configured():
+        raise RuntimeError(
+            "WhatsApp is not configured. Set SPRINGEDGE_PHONE_NUMBER_ID and SPRINGEDGE_WABA_API_KEY."
+        )
 
-    try:
-        result = await send_sms(phone, body, msg_type="transactional")
-        result["channel"] = "whatsapp_via_sms"
-        if WHATSAPP_TEMPLATE:
-            result["template"] = WHATSAPP_TEMPLATE
-            result["note"] = (
-                "Delivered as SMS (web.springedge.com). "
-                "Native WhatsApp template API requires api.springedge.com DNS."
+    cfg = _pinbot_cfg()
+    tname = (template_name or WHATSAPP_TEMPLATE).strip()
+    params = list(template_params) if template_params else None
+    safe_params = None
+    if params:
+        safe_params = [sanitize_template_text(p, max_len=200 if i == 0 else 450) for i, p in enumerate(params)]
+    elif tname:
+        safe_params = ["Franklin Wardcorpp Alert", sanitize_template_text(message)]
+
+    # §8 template, or §1 plain text (TEXT_ONLY / fallback)
+    if tname and not WHATSAPP_TEXT_ONLY:
+        try:
+            result = await send_template(
+                phone,
+                tname,
+                safe_params or [],
+                language=WHATSAPP_TEMPLATE_LANG or "en",
+                event_type=event_type,
+                **cfg,
             )
-        return result
+            result["message"] = message
+            return result
+        except Exception as e:
+            if WHATSAPP_TEXT_FALLBACK and _is_template_send_error(e):
+                logger.warning(
+                    "PinBot template §8 failed (%s); using text §1 to %s",
+                    str(e)[:160],
+                    phone,
+                )
+                body = _whatsapp_text_from_template_params(safe_params or params, message)
+                result = await send_text(phone, body, event_type=event_type, **cfg)
+                result["delivery_mode"] = "pinbot_text_fallback"
+                result["template"] = tname
+                result["template_error"] = str(e)[:300]
+                return result
+            raise RuntimeError(_friendly_error(e)) from e
+
+    body = _whatsapp_text_from_template_params(safe_params or params, message) if tname else sanitize_template_text(message, max_len=1000)
+    result = await send_text(phone, body, event_type=event_type, **cfg)
+    result["delivery_mode"] = "pinbot_text" if WHATSAPP_TEXT_ONLY else "pinbot_plain_text"
+    if tname:
+        result["template"] = tname
+    return result
+
+
+async def send_whatsapp_location(
+    to: str,
+    lat: float,
+    lng: float,
+    *,
+    name: str = "",
+    address: str = "",
+    event_type: str | None = None,
+) -> dict[str, Any]:
+    """PinBot v3 §2 Send Location Message."""
+    from pinbot_whatsapp import send_location
+
+    phone = normalize_phone(to)
+    if not phone:
+        return {"status": "skipped", "reason": "invalid_phone", "to": to}
+    if not whatsapp_configured():
+        raise RuntimeError("WhatsApp is not configured.")
+    return await send_location(
+        phone, lat, lng,
+        name=name, address=address, event_type=event_type,
+        **_pinbot_cfg(),
+    )
+
+
+async def pinbot_account_status() -> dict[str, Any] | None:
+    """§26 Get user details — linked WABA numbers."""
+    if not whatsapp_configured():
+        return None
+    try:
+        from pinbot_whatsapp import fetch_user_details
+        return await fetch_user_details(WHATSAPP_API_BASE, WABA_API_KEY)
     except Exception as e:
-        raise RuntimeError(_friendly_error(e)) from e
+        logger.warning("PinBot getuserdetails failed: %s", e)
+        return {"error": str(e)[:200]}
 
 
-async def send_message(to: str, message: str, channel: str = "sms") -> dict[str, Any]:
+async def send_message(
+    to: str,
+    message: str,
+    channel: str = "sms",
+    *,
+    template_name: str = "",
+    template_params: list[str] | None = None,
+    event_type: str | None = None,
+) -> dict[str, Any]:
     ch = (channel or "sms").lower()
     if ch == "whatsapp":
-        return await send_whatsapp(to, message)
+        return await send_whatsapp(
+            to, message,
+            template_name=template_name,
+            template_params=template_params,
+            event_type=event_type,
+        )
     return await send_sms(to, message)

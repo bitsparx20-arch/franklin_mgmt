@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   House, MapPin, Users, Phone, Kanban, Package, Receipt,
-  ChartBar, UserCircle, Bell, FileText, SignOut, List as ListIcon,
+  ChartBar, UserCircle, Bell, FileText, SignOut, List as ListIcon, Megaphone,
 } from "@phosphor-icons/react";
 import { useAuth } from "../context/AuthContext";
 import { ThemeToggle } from "./ThemeToggle";
@@ -21,6 +21,7 @@ const NAV = [
   { to: "/visits", icon: MapPin, label: "Visits", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
   { to: "/pocs", icon: Phone, label: "POCs", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
   { to: "/followups", icon: Bell, label: "Follow-ups", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
+  { to: "/broadcast", icon: Megaphone, label: "Broadcast", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
   { to: "/pipeline", icon: Kanban, label: "Pipeline", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
   { to: "/products", icon: Package, label: "Products", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
   { to: "/bills", icon: Receipt, label: "Bills", roles: ["ceo", "admin", "sales_manager", "salesperson"] },
@@ -60,7 +61,7 @@ const SidebarContent = ({ user, onNavigate, scope = "desktop" }) => (
       ))}
     </nav>
     <div className="p-4 border-t border-border/60">
-      <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">v1.0 · SpringEdge SMS</div>
+      <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">v1.0</div>
     </div>
   </div>
 );

@@ -14,6 +14,7 @@ import Bills from "./pages/Bills";
 import Performance from "./pages/Performance";
 import Employees from "./pages/Employees";
 import Reports from "./pages/Reports";
+import Broadcast from "./pages/Broadcast";
 
 import "./App.css";
 
@@ -36,6 +37,7 @@ function App() {
               <Route path="/performance" element={<ProtectedRoute allow={["ceo","admin","sales_manager"]}><Performance /></ProtectedRoute>} />
               <Route path="/employees" element={<ProtectedRoute allow={["ceo","admin","sales_manager"]}><Employees /></ProtectedRoute>} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/broadcast" element={<Broadcast />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

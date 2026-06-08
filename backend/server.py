@@ -15,7 +15,11 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Respons
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from springedge import is_configured as springedge_configured, send_message as springedge_send_message
+from springedge import (
+    is_configured as springedge_configured,
+    send_message as springedge_send_message,
+    status_detail as springedge_status_detail,
+)
 
 # ---------- App Setup ----------
 mongo_url = os.environ['MONGO_URL']
@@ -122,7 +126,7 @@ class LoginBody(BaseModel):
 
 class VisitCreate(BaseModel):
     client_name: str
-    client_type: Literal["Fabricator", "Transporter", "Dealer", "PSU", "Other"]
+    client_type: str = Field(min_length=1, max_length=80)
     location_text: str
     lat: Optional[float] = None
     lng: Optional[float] = None
@@ -225,10 +229,10 @@ async def startup():
             "id": str(uuid.uuid4()),
             "email": ceo_email,
             "password_hash": hash_password(ceo_password),
-            "name": "Founder CEO",
+            "name": "Vivek Wadhwa",
             "role": "ceo",
             "designation": "CEO",
-            "phone": "+91-9999999999",
+            "phone": "+919820059881",
             "area": "HQ",
             "target": 0,
             "reporting_manager_id": None,
@@ -237,40 +241,17 @@ async def startup():
         }
         await db.users.insert_one(ceo)
         logger.info(f"Seeded CEO: {ceo_email}")
-        # Seed sample data
         await seed_sample_data(ceo["id"])
 
+    from seeds_team import ensure_team_users
+    team = await ensure_team_users(db, hash_password=hash_password, remove_legacy=True)
+    if team.get("inserted") or team.get("updated"):
+        logger.info(f"Team sync: {team}")
+
 async def seed_sample_data(ceo_id: str):
-    """Seed demo admin, manager, salespeople + sample products + a few deals."""
-    admin = {
-        "id": str(uuid.uuid4()), "email": "admin@franklinwardcorpp.com",
-        "password_hash": hash_password("admin123"), "name": "Ravi Admin", "role": "admin",
-        "designation": "Operations Admin", "phone": "+91-9000000001",
-        "area": "North", "target": 0, "reporting_manager_id": ceo_id,
-        "photo_url": "", "created_at": iso(now_utc()),
-    }
-    manager = {
-        "id": str(uuid.uuid4()), "email": "manager@franklinwardcorpp.com",
-        "password_hash": hash_password("manager123"), "name": "Priya Manager", "role": "sales_manager",
-        "designation": "North Zone Manager", "phone": "+91-9000000002",
-        "area": "North", "target": 2500000, "reporting_manager_id": admin["id"],
-        "photo_url": "", "created_at": iso(now_utc()),
-    }
-    sp1 = {
-        "id": str(uuid.uuid4()), "email": "sales1@franklinwardcorpp.com",
-        "password_hash": hash_password("sales123"), "name": "Arjun Field", "role": "salesperson",
-        "designation": "Field Sales Executive", "phone": "+91-9000000003",
-        "area": "Delhi NCR", "target": 800000, "reporting_manager_id": manager["id"],
-        "photo_url": "", "created_at": iso(now_utc()),
-    }
-    sp2 = {
-        "id": str(uuid.uuid4()), "email": "sales2@franklinwardcorpp.com",
-        "password_hash": hash_password("sales123"), "name": "Sneha Field", "role": "salesperson",
-        "designation": "Field Sales Executive", "phone": "+91-9000000004",
-        "area": "Mumbai", "target": 750000, "reporting_manager_id": manager["id"],
-        "photo_url": "", "created_at": iso(now_utc()),
-    }
-    await db.users.insert_many([admin, manager, sp1, sp2])
+    """Seed team, products, and rich sample CRM data on first empty DB."""
+    from seeds_team import ensure_team_users
+    await ensure_team_users(db, hash_password=hash_password, remove_legacy=True)
 
     products = [
         {"id": str(uuid.uuid4()), "name": "Industrial Bolt M16", "sku": "FW-BLT-M16", "unit_price": 45, "category": "Fasteners", "gst_percent": 18, "created_at": iso(now_utc())},
@@ -295,9 +276,25 @@ async def seed_sample_data(ceo_id: str):
 
 # ---------- SpringEdge messaging ----------
 
-async def springedge_send(to: str, message: str, channel: str = "sms") -> dict:
+async def springedge_send(
+    to: str,
+    message: str,
+    channel: str = "sms",
+    *,
+    template_name: str = "",
+    template_params: list[str] | None = None,
+    user_id: str | None = None,
+    broadcast_id: str | None = None,
+    recipient_label: str | None = None,
+    event_type: str | None = None,
+) -> dict:
     try:
-        result = await springedge_send_message(to, message, channel)
+        result = await springedge_send_message(
+            to, message, channel,
+            template_name=template_name,
+            template_params=template_params,
+            event_type=event_type,
+        )
         status = result.get("status", "unknown")
     except Exception as e:
         logger.exception("SpringEdge send failed")
@@ -314,6 +311,10 @@ async def springedge_send(to: str, message: str, channel: str = "sms") -> dict:
         "status": status,
         "detail": result,
         "sent_at": iso(now_utc()),
+        "user_id": user_id,
+        "broadcast_id": broadcast_id,
+        "recipient_label": recipient_label,
+        "event_type": event_type,
     }
     await db.sms_logs.insert_one(doc)
     return result
@@ -398,7 +399,9 @@ async def update_user(user_id: str, body: UserUpdate, actor: dict = Depends(get_
         raise HTTPException(404, "Not found")
     if target["id"] != actor["id"] and not can_manage(actor["role"], target["role"]):
         raise HTTPException(403, "Cannot edit this user")
-    update = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    update = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None and v != ""}
+    if "role" in update and not can_manage(actor["role"], update["role"]):
+        raise HTTPException(403, "Cannot assign this role")
     if "password" in update:
         update["password_hash"] = hash_password(update.pop("password"))
     if update:
@@ -559,8 +562,21 @@ async def log_followup(fid: str, body: FollowUpLog, actor: dict = Depends(get_cu
             poc = await db.pocs.find_one({"id": f["poc_id"]})
             if poc:
                 phone = (poc.get("whatsapp") or poc.get("mobile") or "").strip()
-        text = body.notes or f"Follow-up from {actor['name']} re: {f.get('client_name', 'your account')}"
-        messaging = await springedge_send(phone or f.get("poc_name", ""), text, "whatsapp")
+        text = body.notes or (
+            f"Follow-up from {actor['name']} re: {f.get('client_name', 'your account')}."
+        )
+        alert = "Follow-up Reminder"
+        from ceo_notify import whatsapp_template_name, whatsapp_template_params
+        tmpl = whatsapp_template_name()
+        messaging = await springedge_send(
+            phone or f.get("poc_name", ""),
+            text,
+            "whatsapp",
+            template_name=tmpl,
+            template_params=whatsapp_template_params(alert, text),
+            user_id=actor["id"],
+            event_type="followup_whatsapp",
+        )
     return {"ok": True, "log": log, "messaging": messaging}
 
 @api.post("/followups/escalate-overdue")
@@ -629,10 +645,27 @@ async def update_deal(deal_id: str, body: DealUpdate, actor: dict = Depends(get_
     update["touchpoints"] = deal.get("touchpoints", 0) + 1
     await db.deals.update_one({"id": deal_id}, {"$set": update})
     new = await db.deals.find_one({"id": deal_id}, {"_id": 0})
-    # Notify if WON: hint billing
-    if body.stage == "WON":
+    old_stage = deal.get("stage")
+    if body.stage == "WON" and old_stage != "WON":
         await push_notification(deal["salesperson_id"], "Deal Won 🎉",
                                 f"{deal['client_name']} moved to WON. Create invoice.", "success")
+    if body.stage in ("WON", "LOST") and body.stage != old_stage:
+        from ceo_notify import notify_ceos_whatsapp
+        value = new.get("estimated_value") or 0
+        area = new.get("area") or "-"
+        msg = (
+            f"{new.get('client_name', 'Client')} ({area}) moved to {body.stage} "
+            f"by {actor['name']}. Value Rs.{value:,.0f}."
+        )
+        if body.stage == "LOST" and (body.lost_reason or new.get("lost_reason")):
+            msg += f" Reason: {body.lost_reason or new.get('lost_reason')}."
+        await notify_ceos_whatsapp(
+            db, springedge_send,
+            alert="Deal Status Update",
+            message=msg,
+            event_type=f"deal_{body.stage.lower()}",
+            triggered_by=actor["id"],
+        )
     return new
 
 @api.delete("/deals/{deal_id}")
@@ -703,6 +736,18 @@ async def create_bill(body: BillCreate, actor: dict = Depends(get_current_user))
     }
     await db.bills.insert_one(doc)
     doc.pop("_id", None)
+    from ceo_notify import notify_ceos_whatsapp
+    await notify_ceos_whatsapp(
+        db, springedge_send,
+        alert="New Bill Generated",
+        message=(
+            f"Invoice {doc['invoice_no']}: {doc['client_name']} billed by {actor['name']}. "
+            f"Grand total Rs.{doc['grand_total']:,.0f} "
+            f"(subtotal Rs.{doc['subtotal']:,.0f}, GST Rs.{doc['gst_total']:,.0f})."
+        ),
+        event_type="bill_created",
+        triggered_by=actor["id"],
+    )
     return doc
 
 @api.get("/bills")
@@ -854,8 +899,22 @@ async def agent_locations(actor: dict = Depends(require_roles("ceo", "admin", "s
         "Kolkata": (22.5726, 88.3639), "Hyderabad": (17.3850, 78.4867),
         "Pune": (18.5204, 73.8567), "Ahmedabad": (23.0225, 72.5714),
         "North": (28.7041, 77.1025), "South": (12.9716, 77.5946),
-        "HQ": (22.5, 78.9),
+        "National": (22.5, 78.9), "HQ": (22.5, 78.9),
     }
+    region_keywords = [
+        ("Southern", (12.9716, 77.5946)),
+        ("Eastern", (22.5726, 88.3639)),
+        ("Northern", (28.7041, 77.1025)),
+        ("Western", (19.0760, 72.8777)),
+    ]
+
+    def _area_coord(area: str) -> tuple[float, float]:
+        if area in area_hq:
+            return area_hq[area]
+        for keyword, coord in region_keywords:
+            if keyword in area:
+                return coord
+        return area_hq["HQ"]
     out = []
     for u in users:
         visit = by_visit.get(u["id"])
@@ -870,7 +929,7 @@ async def agent_locations(actor: dict = Depends(require_roles("ceo", "admin", "s
             lat, lng = visit["lat"], visit["lng"]
             source = "visit"; last_seen = visit_ts; client = visit.get("client")
         else:
-            coord = area_hq.get(u.get("area", ""), area_hq["HQ"])
+            coord = _area_coord(u.get("area", ""))
             offset = (hash(u["id"]) % 100) / 1000.0
             lat, lng = coord[0] + offset, coord[1] + offset
             source = "default"; last_seen = None; client = "No GPS yet"
@@ -894,6 +953,30 @@ async def ping_location(body: PingLocationBody, actor: dict = Depends(get_curren
         {"id": actor["id"]},
         {"$set": {"last_ping_lat": body.lat, "last_ping_lng": body.lng, "last_ping_at": iso(now_utc())}}
     )
+    if actor["role"] == "salesperson":
+        from ceo_notify import notify_ceos_whatsapp, ceo_phones
+        from springedge import send_whatsapp_location
+        area = actor.get("area") or "-"
+        await notify_ceos_whatsapp(
+            db, springedge_send,
+            alert="Location Shared",
+            message=(
+                f"{actor['name']} ({area}) shared live location. "
+                f"Lat {body.lat:.4f}, Lng {body.lng:.4f}. View on the live agent map."
+            ),
+            event_type="gps_ping",
+            triggered_by=actor["id"],
+        )
+        for phone in await ceo_phones(db):
+            try:
+                await send_whatsapp_location(
+                    phone, body.lat, body.lng,
+                    name=f"{actor['name']} - Live GPS",
+                    address=area,
+                    event_type="gps_ping",
+                )
+            except Exception as e:
+                logger.warning("CEO location pin failed for %s: %s", phone, e)
     return {"ok": True}
 
 @api.get("/dashboard/top-products")
@@ -911,21 +994,162 @@ async def top_products(actor: dict = Depends(get_current_user)):
 
 @api.get("/messaging/status")
 async def messaging_status(actor: dict = Depends(get_current_user)):
+    from springedge import pinbot_account_status
+    detail = springedge_status_detail()
+    pinbot = await pinbot_account_status()
     return {
-        "configured": springedge_configured(),
+        "configured": detail["sms_configured"] or detail["whatsapp_configured"],
         "channels": ["sms", "whatsapp"],
+        **detail,
+        "pinbot_account": pinbot,
     }
 
 class MessagingTestBody(BaseModel):
     to: str
     message: str = "Franklin Wardcorpp CRM test message"
     channel: Literal["sms", "whatsapp"] = "sms"
+    template_name: Optional[str] = None
+    template_params: Optional[List[str]] = None
+
+class BroadcastBody(BaseModel):
+    message: str
+    channel: Literal["sms", "whatsapp"] = "sms"
+    poc_ids: Optional[List[str]] = None
+    phones: Optional[List[str]] = None
+    template_name: Optional[str] = None
+    template_params: Optional[List[str]] = None
+    alert_title: Optional[str] = None  # lms_notification {{1}}
+
+@api.get("/messaging/recipients")
+async def messaging_recipients(actor: dict = Depends(get_current_user)):
+    """POC contacts available for broadcast (role-scoped)."""
+    q = await scoped_user_filter_async(actor)
+    pocs = await db.pocs.find(q, {"_id": 0, "password_hash": 0}).sort("client_name", 1).to_list(2000)
+    out = []
+    for p in pocs:
+        phone = (p.get("whatsapp") or p.get("mobile") or "").strip()
+        if not phone:
+            continue
+        out.append({
+            "id": p["id"],
+            "client_name": p.get("client_name", ""),
+            "poc_name": p.get("poc_name", ""),
+            "phone": phone,
+            "area": p.get("area", ""),
+            "salesperson_name": p.get("salesperson_name", ""),
+        })
+    return out
+
+@api.get("/messaging/logs")
+async def messaging_logs(
+    actor: dict = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=200),
+):
+    filt: dict = {}
+    if actor["role"] == "salesperson":
+        filt["user_id"] = actor["id"]
+    logs = await db.sms_logs.find(filt, {"_id": 0}).sort("sent_at", -1).to_list(limit)
+    return logs
+
+@api.post("/messaging/broadcast")
+async def messaging_broadcast(body: BroadcastBody, actor: dict = Depends(get_current_user)):
+    """Send SMS or WhatsApp to selected POCs and/or manual numbers."""
+    if not body.message.strip():
+        raise HTTPException(400, "Message is required")
+
+    targets: list[dict] = []
+    seen_phones: set[str] = set()
+
+    if body.poc_ids:
+        q = await scoped_user_filter_async(actor)
+        q["id"] = {"$in": body.poc_ids}
+        async for p in db.pocs.find(q, {"_id": 0}):
+            phone = (p.get("whatsapp") or p.get("mobile") or "").strip()
+            if not phone or phone in seen_phones:
+                continue
+            seen_phones.add(phone)
+            targets.append({
+                "phone": phone,
+                "label": f"{p.get('poc_name', '')} · {p.get('client_name', '')}".strip(" ·"),
+            })
+
+    for raw in body.phones or []:
+        phone = raw.strip()
+        if phone and phone not in seen_phones:
+            seen_phones.add(phone)
+            targets.append({"phone": phone, "label": phone})
+
+    if not targets:
+        raise HTTPException(400, "No valid recipients — select POCs or enter phone numbers")
+
+    template_name = body.template_name or ""
+    template_params = body.template_params
+    if body.channel == "whatsapp":
+        if not template_name:
+            from ceo_notify import whatsapp_template_name, whatsapp_template_params
+            template_name = whatsapp_template_name()
+        if not template_params:
+            alert = (body.alert_title or "Franklin Wardcorpp Notification").strip()
+            template_params = whatsapp_template_params(alert, body.message.strip())
+
+    broadcast_id = str(uuid.uuid4())
+    results = []
+    sent = failed = mocked = skipped = 0
+
+    for t in targets:
+        result = await springedge_send(
+            t["phone"],
+            body.message.strip(),
+            body.channel,
+            template_name=template_name if body.channel == "whatsapp" else "",
+            template_params=template_params if body.channel == "whatsapp" else None,
+            user_id=actor["id"],
+            broadcast_id=broadcast_id,
+            recipient_label=t["label"],
+        )
+        st = result.get("status", "unknown")
+        if st in ("sent", "mocked", "queued"):
+            sent += 1 if st != "mocked" else 0
+            mocked += 1 if st == "mocked" else 0
+        elif st == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+        results.append({
+            "to": t["phone"],
+            "label": t["label"],
+            "status": st,
+            "detail": result,
+        })
+
+    return {
+        "ok": True,
+        "broadcast_id": broadcast_id,
+        "channel": body.channel,
+        "total": len(targets),
+        "sent": sent,
+        "mocked": mocked,
+        "failed": failed,
+        "skipped": skipped,
+        "results": results,
+    }
 
 @api.post("/messaging/test")
 async def messaging_test(body: MessagingTestBody, actor: dict = Depends(require_roles("ceo", "admin"))):
     """Send a test message (admin/CEO only)."""
-    result = await springedge_send(body.to, body.message, body.channel)
+    result = await springedge_send(
+        body.to, body.message, body.channel,
+        template_name=body.template_name or "",
+        template_params=body.template_params,
+        user_id=actor["id"],
+    )
     return result
+
+@api.post("/dev/seed-team")
+async def dev_seed_team(actor: dict = Depends(require_roles("ceo", "admin"))):
+    """Upsert Franklin sales team (CEOs, national head, regional salespeople)."""
+    from seeds_team import ensure_team_users
+    return await ensure_team_users(db, hash_password=hash_password, remove_legacy=True)
 
 @api.post("/dev/seed-whatsapp-samples")
 async def dev_seed_whatsapp_samples(actor: dict = Depends(require_roles("ceo", "admin"))):
@@ -986,76 +1210,9 @@ class ChatAskBody(BaseModel):
 
 async def build_crm_context(actor: dict) -> str:
     """Snapshot of CRM facts injected into Claude system prompt."""
-    q = await scoped_user_filter_async(actor)
-    total_visits = await db.visits.count_documents(q)
-    total_pocs = await db.pocs.count_documents(q)
-    total_deals = await db.deals.count_documents(q)
-    won = await db.deals.count_documents({**q, "stage": "WON"})
-    lost = await db.deals.count_documents({**q, "stage": "LOST"})
-    # Stage pipeline
-    stage_summary = {}
-    pipeline_total = 0
-    async for d in db.deals.find(q, {"_id": 0, "stage": 1, "estimated_value": 1, "client_name": 1, "salesperson_name": 1}):
-        s = d.get("stage", "?")
-        stage_summary[s] = stage_summary.get(s, {"count": 0, "value": 0})
-        stage_summary[s]["count"] += 1
-        stage_summary[s]["value"] += d.get("estimated_value", 0) or 0
-        if s != "LOST":
-            pipeline_total += d.get("estimated_value", 0) or 0
-    # Revenue
-    bills = await db.bills.find(q, {"_id": 0, "grand_total": 1, "client_name": 1, "salesperson_name": 1, "created_at": 1, "lines": 1}).to_list(500)
-    revenue = sum(b.get("grand_total", 0) for b in bills)
-    # Top performers
-    sp_q = {"role": "salesperson"}
-    if actor["role"] == "sales_manager":
-        sp_q["reporting_manager_id"] = actor["id"]
-    salespeople = await db.users.find(sp_q, {"_id": 0, "password_hash": 0}).to_list(500)
-    perf = []
-    for sp in salespeople:
-        sp_bills = [b for b in bills if b.get("salesperson_name") == sp["name"]]
-        actual = sum(b.get("grand_total", 0) for b in sp_bills)
-        target = sp.get("target", 0) or 0
-        perf.append({
-            "name": sp["name"], "area": sp.get("area", ""),
-            "target": target, "actual": round(actual, 2),
-            "conversion": round((actual / target * 100) if target else 0, 1),
-        })
-    perf.sort(key=lambda x: -x["conversion"])
-    # Top products
-    prod = {}
-    for b in bills:
-        for ln in b.get("lines", []):
-            prod[ln["product_name"]] = prod.get(ln["product_name"], 0) + ln.get("line_amount", 0)
-    top_products = sorted(prod.items(), key=lambda x: -x[1])[:5]
-    # Overdue followups
-    today = now_utc().date().isoformat()
-    overdue_q = {**q, "status": "pending", "due_date": {"$lt": today}} if q else {"status": "pending", "due_date": {"$lt": today}}
-    overdue = await db.followups.count_documents(overdue_q)
-
-    lines = [
-        f"COMPANY: Franklin Wardcorpp (Industrial Fasteners & Steel — India)",
-        f"USER: {actor['name']} ({actor['role']})",
-        f"SCOPE: {'team-wide' if actor['role'] in ('ceo','admin') else 'own team' if actor['role']=='sales_manager' else 'self'}",
-        "",
-        f"== TOTALS ==",
-        f"Visits: {total_visits} · POCs: {total_pocs} · Deals: {total_deals} (WON: {won}, LOST: {lost})",
-        f"Pipeline value (excl. lost): ₹{pipeline_total:,.0f}",
-        f"Total billed revenue: ₹{revenue:,.0f}",
-        f"Overdue follow-ups: {overdue}",
-        "",
-        f"== KANBAN STAGES ==",
-    ]
-    for s, info in stage_summary.items():
-        lines.append(f"  {s}: {info['count']} deals · ₹{info['value']:,.0f}")
-    lines.append("")
-    lines.append(f"== SALESPEOPLE PERFORMANCE (sorted by conversion) ==")
-    for p in perf[:10]:
-        lines.append(f"  {p['name']} ({p['area']}): ₹{p['actual']:,.0f} / target ₹{p['target']:,.0f} · {p['conversion']}%")
-    lines.append("")
-    lines.append(f"== TOP PRODUCTS BY REVENUE ==")
-    for name, val in top_products:
-        lines.append(f"  {name}: ₹{val:,.0f}")
-    return "\n".join(lines)
+    from crm_ai_fallback import fetch_crm_snapshot, format_crm_context
+    snapshot = await fetch_crm_snapshot(db, actor, scoped_filter_async=scoped_user_filter_async)
+    return format_crm_context(snapshot)
 
 @api.get("/ai/status")
 async def ai_status(actor: dict = Depends(require_roles("ceo", "admin", "sales_manager"))):
@@ -1064,6 +1221,8 @@ async def ai_status(actor: dict = Depends(require_roles("ceo", "admin", "sales_m
 
 @api.post("/ai/ask")
 async def ai_ask(body: ChatAskBody, actor: dict = Depends(require_roles("ceo", "admin", "sales_manager"))):
+    from bedrock_llm import ContentFilteredError
+    from crm_ai_fallback import fetch_crm_snapshot, format_crm_context, local_crm_insight
     from llm_provider import complete_chat, is_configured
 
     if not is_configured():
@@ -1073,11 +1232,13 @@ async def ai_ask(body: ChatAskBody, actor: dict = Depends(require_roles("ceo", "
         )
 
     session_id = body.session_id or str(uuid.uuid4())
-    context = await build_crm_context(actor)
+    snapshot = await fetch_crm_snapshot(db, actor, scoped_filter_async=scoped_user_filter_async)
+    context = format_crm_context(snapshot)
     system = (
         "You are FRANKLIN-AI, a sharp, concise sales-intelligence analyst for the Franklin Wardcorpp executive team. "
         "You answer questions about the CRM data shown below. Be direct, cite numbers, surface anomalies, and recommend actions. "
-        "Use rupees (₹) and short bullet points. Never invent numbers — if a metric isn't in the context, say so.\n\n"
+        "Use rupees (₹) and short bullet points. Never invent numbers — if a metric isn't in the context, say so. "
+        "Business vocabulary: 'revenue loss', 'pipeline gaps', and 'leakage' always refer to missed sales opportunities and deal slippage — never physical or environmental topics.\n\n"
         f"=== LIVE CRM SNAPSHOT ===\n{context}\n=== END SNAPSHOT ==="
     )
 
@@ -1087,6 +1248,17 @@ async def ai_ask(body: ChatAskBody, actor: dict = Depends(require_roles("ceo", "
 
     try:
         reply = await complete_chat(system, prior, body.message)
+        if any(m in reply.lower() for m in ("blocked by our content filters", "content filter")):
+            raise ContentFilteredError(body.message)
+    except ContentFilteredError:
+        logger.warning("Bedrock content filter — using local CRM insight fallback")
+        reply = local_crm_insight(snapshot, body.message)
+        if not reply:
+            reply = (
+                "I couldn't generate an AI answer because Bedrock's content filter blocked the response. "
+                "Try rephrasing (e.g. 'Where are we losing revenue?') or ask about pipeline stages, "
+                "top performers, or overdue follow-ups."
+            )
     except Exception as e:
         logger.exception("LLM error")
         raise HTTPException(500, str(e))

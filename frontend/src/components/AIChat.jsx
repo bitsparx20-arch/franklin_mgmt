@@ -11,7 +11,7 @@ const QUICK_PROMPTS = [
   "Summarize this month's pipeline health.",
   "Who are my top 3 performers and why?",
   "What deals should I focus on this week?",
-  "Where are we leaking revenue?",
+  "Where are we losing revenue?",
   "Suggest 3 actions for tomorrow's standup.",
 ];
 
@@ -60,13 +60,13 @@ export const AIChat = () => {
           <span className="absolute -top-1 -right-1 h-3 w-3 bg-[hsl(var(--accent))] rounded-full animate-pulse" />
         </button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
+      <SheetContent side="right" className="z-[100] w-full sm:max-w-md p-0 flex flex-col">
         <SheetHeader className="px-5 py-4 border-b border-border">
           <SheetTitle className="font-heading flex items-center gap-2">
             <Sparkle size={18} weight="fill" className="text-[hsl(var(--accent))]" />
             Franklin-AI Assistant
           </SheetTitle>
-          <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">AWS Bedrock · live CRM context</div>
+          <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">Live CRM context</div>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">

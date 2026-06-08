@@ -78,10 +78,14 @@ Open **http://localhost:3000**
 
 | Role | Email | Password |
 |------|-------|----------|
-| CEO | `ceo@franklinwardcorpp.com` | `ceo12345` |
-| Admin | `admin@franklinwardcorpp.com` | `admin123` |
-| Sales Manager | `manager@franklinwardcorpp.com` | `manager123` |
-| Salesperson | `sales1@franklinwardcorpp.com` | `sales123` |
+| CEO — Vivek Wadhwa | `ceo@franklinwardcorpp.com` | `ceo12345` |
+| CEO — OM Wadhwa | `om.wadhwa@franklinwardcorpp.com` | `ceo12345` |
+| National Sales Head — Joe Jacob | `manager@franklinwardcorpp.com` | `manager123` |
+| South — Swapnil | `swapnil@franklinwardcorpp.com` | `sales123` |
+| East — ChiroDeep | `chirodeep@franklinwardcorpp.com` | `sales123` |
+| North — Manish | `manish@franklinwardcorpp.com` | `sales123` |
+| West — Thomas Philip | `thomas.philip@franklinwardcorpp.com` | `sales123` |
+| Admin (ops) | `admin@franklinwardcorpp.com` | `admin123` |
 
 ## Feature map
 
@@ -91,6 +95,7 @@ Open **http://localhost:3000**
 | Visits | `/visits` | GPS capture on new visit |
 | POCs | `/pocs` | Contact records |
 | Follow-ups | `/followups` | Log actions; escalate overdue (manager+) |
+| Broadcast | `/messaging/broadcast` | SMS + WhatsApp to POC contacts (SpringEdge / PinBot) |
 | Pipeline | `/deals` | Drag-and-drop Kanban stages |
 | Products | `/products` | Admin/CEO CRUD |
 | Bills | `/bills` | GST invoicing from product catalog |
@@ -100,11 +105,54 @@ Open **http://localhost:3000**
 | AI chat (FAB) | `/ai/ask` | AWS Bedrock (`LLM_PROVIDER=bedrock`) or Emergent legacy |
 | Notifications | `/notifications` | Header bell |
 
-**SpringEdge** powers SMS and WhatsApp (follow-up logs, manager escalations). Set `SPRINGEDGE_API_KEY` in `backend/.env`. Without a key, messages are logged only (mock mode). Test with `POST /api/messaging/test` as CEO/Admin.
+**SpringEdge** powers SMS and WhatsApp. SMS uses `web.springedge.com`; WhatsApp uses the PinBot API (`partnersv1.pinbot.ai`) per `WhatsApp_API_Pinned_Documentation.pdf`. Set in `backend/.env`:
+
+- SMS: `SPRINGEDGE_API_KEY`, `SPRINGEDGE_SENDER_ID`
+- WhatsApp: `SPRINGEDGE_WABA_API_KEY` (or same API key), `SPRINGEDGE_PHONE_NUMBER_ID`
+
+Use the **Broadcast** tab in the app or `POST /api/messaging/broadcast`. Without keys, messages are logged only (mock mode).
 
 ## API docs
 
 With the backend running: **http://localhost:8000/docs**
+
+## Deploy to KVM / VPS (e.g. `194.238.19.53`)
+
+Production layout: **nginx** serves the React build and proxies `/api` → **uvicorn** on `127.0.0.1:8000`, with **MongoDB** on the same host.
+
+### 1. Allow SSH from your machine (one-time)
+
+Your local public key (add via hosting panel KVM console if SSH password is awkward):
+
+```powershell
+Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
+```
+
+On the server as `root`:
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo 'PASTE_PUBLIC_KEY_HERE' >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+### 2. Deploy from Windows
+
+From the repo root (will prompt for SSH password if no key is authorized):
+
+```powershell
+.\deploy\deploy-from-windows.ps1 -Server root@194.238.19.53
+```
+
+This installs MongoDB, Node 20, nginx, builds the frontend, and starts `franklin-backend` via systemd. Your local `backend/.env` is copied to the server (not committed to git).
+
+### 3. Verify
+
+- App: **http://194.238.19.53/**
+- API docs: **http://194.238.19.53/docs**
+- Logs: `ssh root@194.238.19.53 journalctl -u franklin-backend -f`
+
+Re-deploy after code changes: run the same `deploy-from-windows.ps1` command again (add `-SkipBootstrap` after the first run).
 
 ## Troubleshooting
 

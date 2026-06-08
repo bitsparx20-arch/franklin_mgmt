@@ -138,10 +138,11 @@ export default function Visits() {
 
 function VisitForm({ onClose }) {
   const [form, setForm] = useState({
-    client_name: "", client_type: "Fabricator", location_text: "",
-    lat: null, lng: null, remarks: "", status: "Completed",
+    client_name: "", client_type: "Fabricator", custom_client_type: "",
+    location_text: "", lat: null, lng: null, remarks: "", status: "Completed",
   });
   const [busy, setBusy] = useState(false);
+  const isOtherType = form.client_type === "Other";
 
   const captureGPS = () => {
     if (!navigator.geolocation) return toast.error("Geolocation not supported");
@@ -156,9 +157,17 @@ function VisitForm({ onClose }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (isOtherType && !form.custom_client_type.trim()) {
+      return toast.error("Enter a custom client type");
+    }
     setBusy(true);
     try {
-      await api.post("/visits", form);
+      const { custom_client_type, ...rest } = form;
+      const payload = {
+        ...rest,
+        client_type: isOtherType ? custom_client_type.trim() : form.client_type,
+      };
+      await api.post("/visits", payload);
       toast.success("Visit logged");
       onClose();
     } catch (err) {
@@ -177,10 +186,23 @@ function VisitForm({ onClose }) {
       </div>
       <div>
         <Label>Client type</Label>
-        <Select value={form.client_type} onValueChange={(v) => setForm({...form, client_type: v})}>
+        <Select
+          value={form.client_type}
+          onValueChange={(v) => setForm({ ...form, client_type: v, custom_client_type: v === "Other" ? form.custom_client_type : "" })}
+        >
           <SelectTrigger data-testid="visit-type-select"><SelectValue /></SelectTrigger>
           <SelectContent>{CLIENT_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
         </Select>
+        {isOtherType && (
+          <Input
+            className="mt-2"
+            required
+            placeholder="Type custom client type…"
+            value={form.custom_client_type}
+            onChange={(e) => setForm({ ...form, custom_client_type: e.target.value })}
+            data-testid="visit-custom-type-input"
+          />
+        )}
       </div>
       <div>
         <Label>Location</Label>
