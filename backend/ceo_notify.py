@@ -1,4 +1,4 @@
-"""WhatsApp alerts to CEO(s) via the shared lms_notification template."""
+"""CEO notifications — WhatsApp first, mandatory SMS fallback via springedge_send."""
 from __future__ import annotations
 
 import logging
@@ -59,12 +59,12 @@ async def notify_ceos_whatsapp(
     triggered_by: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Send lms_notification template WhatsApp to all configured CEOs.
+    Send lms_notification via WhatsApp; springedge_send enforces mandatory SMS fallback.
     send_fn should be springedge_send from server.py.
     """
     phones = await ceo_phones(db)
     if not phones:
-        logger.warning("CEO WhatsApp skipped — no phone numbers (set SPRINGEDGE_CEO_PHONES or CEO user phones)")
+        logger.warning("CEO notification skipped — no phone numbers (set SPRINGEDGE_CEO_PHONES or CEO user phones)")
         return []
 
     tmpl = whatsapp_template_name()
@@ -72,19 +72,21 @@ async def notify_ceos_whatsapp(
     results: list[dict[str, Any]] = []
 
     for phone in phones:
-        try:
-            result = await send_fn(
-                phone,
-                message,
-                "whatsapp",
-                template_name=tmpl,
-                template_params=params,
-                user_id=triggered_by,
-                recipient_label=f"CEO · {event_type}",
-                event_type=event_type,
-            )
-            results.append({"phone": phone, **result})
-        except Exception as e:
-            logger.exception("CEO WhatsApp failed for %s", phone)
-            results.append({"phone": phone, "status": "failed", "error": str(e)})
+        result = await send_fn(
+            phone,
+            message,
+            "whatsapp",
+            template_name=tmpl,
+            template_params=params,
+            user_id=triggered_by,
+            recipient_label=f"CEO · {event_type}",
+            event_type=event_type,
+        )
+        mode = result.get("delivery_mode", "")
+        if mode == "whatsapp_sms_fallback":
+            logger.info("CEO %s: WhatsApp unavailable, delivered via SMS fallback", phone)
+        elif result.get("status") in ("failed", "skipped", "mocked"):
+            logger.warning("CEO notification to %s: %s", phone, result.get("status"))
+        results.append({"phone": phone, **result})
+
     return results

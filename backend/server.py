@@ -288,26 +288,60 @@ async def springedge_send(
     recipient_label: str | None = None,
     event_type: str | None = None,
 ) -> dict:
+    from springedge import mandatory_sms_fallback, is_configured as sms_ready
+
+    ch = (channel or "sms").lower()
+    result: dict = {}
+    status = "unknown"
     try:
         result = await springedge_send_message(
-            to, message, channel,
+            to, message, ch,
             template_name=template_name,
             template_params=template_params,
             event_type=event_type,
         )
         status = result.get("status", "unknown")
+        if ch == "whatsapp" and sms_ready() and result.get("delivery_mode") != "whatsapp_sms_fallback":
+            bad = status in ("failed", "skipped", "mocked", "unknown")
+            if bad:
+                result = await mandatory_sms_fallback(
+                    to, message,
+                    template_params=template_params,
+                    reason=f"whatsapp_status_{status}",
+                    whatsapp_attempt=result,
+                )
+                status = result.get("status", "unknown")
     except Exception as e:
         logger.exception("SpringEdge send failed")
-        err = str(e)
-        if len(err) > 200 or "HTTPSConnectionPool" in err:
-            err = "Could not reach SpringEdge. Check API key, sender ID, and network."
-        result = {"status": "failed", "error": err, "channel": channel, "to": to}
-        status = "failed"
+        if ch == "whatsapp" and sms_ready():
+            try:
+                result = await mandatory_sms_fallback(
+                    to, message,
+                    template_params=template_params,
+                    reason=f"whatsapp_exception:{str(e)[:120]}",
+                    whatsapp_attempt={"error": str(e)[:300]},
+                )
+                status = result.get("status", "unknown")
+            except Exception as sms_err:
+                logger.exception("Mandatory SMS fallback also failed")
+                err = str(sms_err)
+                if len(err) > 200 or "HTTPSConnectionPool" in err:
+                    err = "Could not reach SpringEdge. Check API key, sender ID, and network."
+                result = {"status": "failed", "error": err, "channel": ch, "to": to}
+                status = "failed"
+        else:
+            err = str(e)
+            if len(err) > 200 or "HTTPSConnectionPool" in err:
+                err = "Could not reach SpringEdge. Check API key, sender ID, and network."
+            result = {"status": "failed", "error": err, "channel": ch, "to": to}
+            status = "failed"
+
+    log_channel = result.get("channel", ch)
     doc = {
         "id": str(uuid.uuid4()),
         "to": to,
         "message": message,
-        "channel": channel,
+        "channel": log_channel,
         "status": status,
         "detail": result,
         "sent_at": iso(now_utc()),
@@ -968,15 +1002,24 @@ async def ping_location(body: PingLocationBody, actor: dict = Depends(get_curren
             triggered_by=actor["id"],
         )
         for phone in await ceo_phones(db):
-            try:
-                await send_whatsapp_location(
-                    phone, body.lat, body.lng,
-                    name=f"{actor['name']} - Live GPS",
-                    address=area,
-                    event_type="gps_ping",
-                )
-            except Exception as e:
-                logger.warning("CEO location pin failed for %s: %s", phone, e)
+            loc_result = await send_whatsapp_location(
+                phone, body.lat, body.lng,
+                name=f"{actor['name']} - Live GPS",
+                address=area,
+                event_type="gps_ping",
+            )
+            await db.sms_logs.insert_one({
+                "id": str(uuid.uuid4()),
+                "to": phone,
+                "message": f"Location pin: {actor['name']} ({area}) Lat {body.lat:.4f}, Lng {body.lng:.4f}",
+                "channel": loc_result.get("channel", "whatsapp"),
+                "status": loc_result.get("status", "unknown"),
+                "detail": loc_result,
+                "sent_at": iso(now_utc()),
+                "user_id": actor["id"],
+                "recipient_label": f"CEO location · {phone}",
+                "event_type": "gps_ping_location",
+            })
     return {"ok": True}
 
 @api.get("/dashboard/top-products")

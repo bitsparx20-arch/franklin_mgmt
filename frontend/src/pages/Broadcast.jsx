@@ -141,7 +141,14 @@ export default function Broadcast() {
       } else if (data.failed > 0) {
         toast.error(`Sent ${data.sent}, failed ${data.failed}`);
       } else {
-        toast.success(`Broadcast sent to ${data.total} recipient(s)`);
+        const smsFallback = data.results?.some(
+          (r) => r.detail?.delivery_mode === "whatsapp_sms_fallback"
+        );
+        toast.success(
+          smsFallback
+            ? `Broadcast sent — delivered via SMS fallback (WhatsApp unavailable)`
+            : `Broadcast sent to ${data.total} recipient(s)`
+        );
       }
       setMessage("");
       load();
@@ -163,7 +170,13 @@ export default function Broadcast() {
         actions={
           <Badge variant="outline" className="gap-1.5 py-1.5 px-2.5 font-normal">
             <Plugs size={14} />
-            {status?.whatsapp_configured ? "WhatsApp live" : status?.sms_configured ? "SMS live" : "Mock mode"}
+            {status?.whatsapp_configured
+              ? "WhatsApp + SMS fallback"
+              : status?.sms_configured
+                ? status?.demo_sms_mode
+                  ? "Trial SMS (mandatory WA fallback)"
+                  : "SMS live (mandatory WA fallback)"
+                : "Mock mode"}
           </Badge>
         }
       />

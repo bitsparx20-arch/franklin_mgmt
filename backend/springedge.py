@@ -37,6 +37,11 @@ WHATSAPP_TEXT_ONLY = os.environ.get("SPRINGEDGE_WHATSAPP_TEXT_ONLY", "false").lo
 )
 API_STYLE = os.environ.get("SPRINGEDGE_API_STYLE", "legacy").strip().lower()
 FORCE_MOCK = os.environ.get("SPRINGEDGE_MOCK", "false").lower() in ("1", "true", "yes")
+DEMO_SMS_MODE = os.environ.get("SPRINGEDGE_DEMO_SMS", "").lower() in ("1", "true", "yes") or SENDER_ID == "SEDEMO"
+DEMO_SMS_TEMPLATE = os.environ.get(
+    "SPRINGEDGE_DEMO_SMS_TEMPLATE",
+    "Hello {name}, This is a test message from spring edge",
+).strip()
 
 
 def is_configured() -> bool:
@@ -48,11 +53,30 @@ def whatsapp_configured() -> bool:
     return bool(WABA_API_KEY and PHONE_NUMBER_ID) and not FORCE_MOCK
 
 
+def format_demo_sms(recipient_name: str = "Customer") -> str:
+    """Trial transactional account only allows this fixed body pattern."""
+    name = sanitize_template_text(recipient_name or "Customer", max_len=40) or "Customer"
+    return DEMO_SMS_TEMPLATE.replace("$var", name).replace("{name}", name)
+
+
+def _recipient_name_for_demo(
+    message: str,
+    template_params: list[str] | None = None,
+) -> str:
+    if template_params and template_params[0]:
+        return template_params[0]
+    words = (message or "").strip().split()
+    return words[0][:40] if words else "Customer"
+
+
 def status_detail() -> dict[str, Any]:
     return {
         "sms_configured": is_configured(),
         "whatsapp_configured": whatsapp_configured(),
         "mock_mode": FORCE_MOCK or not API_KEY,
+        "demo_sms_mode": DEMO_SMS_MODE,
+        "whatsapp_sms_fallback": True,
+        "demo_sms_template": DEMO_SMS_TEMPLATE if DEMO_SMS_MODE else None,
         "sender_id": SENDER_ID or None,
         "phone_number_id": PHONE_NUMBER_ID or None,
         "whatsapp_api": WHATSAPP_API_BASE if whatsapp_configured() else None,
@@ -187,10 +211,13 @@ def _send_legacy_sms_sync(to: str, message: str) -> dict:
         "sender": SENDER_ID,
         "to": to_digits,
         "message": message,
-        "format": "json",
     }
-    # GET and POST both supported; POST avoids URL length limits
-    resp = requests.post(LEGACY_SMS_URL, data=payload, timeout=30)
+    # instantalerts.co trial API uses GET; web.springedge.com accepts POST
+    if "instantalerts.co" in LEGACY_SMS_URL:
+        resp = requests.get(LEGACY_SMS_URL, params=payload, timeout=30)
+    else:
+        payload["format"] = "json"
+        resp = requests.post(LEGACY_SMS_URL, data=payload, timeout=30)
     return _parse_legacy_response(resp)
 
 
@@ -238,10 +265,19 @@ async def _send_rest_sms(to: str, message: str, msg_type: str = "transactional")
     }
 
 
-async def send_sms(to: str, message: str, msg_type: str = "transactional") -> dict[str, Any]:
+async def send_sms(
+    to: str,
+    message: str,
+    msg_type: str = "transactional",
+    *,
+    recipient_name: str | None = None,
+) -> dict[str, Any]:
     phone = normalize_phone(to)
     if not phone:
         return {"status": "skipped", "reason": "invalid_phone", "to": to}
+
+    if DEMO_SMS_MODE:
+        message = format_demo_sms(recipient_name or "Customer")
 
     if not is_configured():
         logger.info("[SpringEdge mock SMS] %s: %s", phone, message[:120])
@@ -289,6 +325,45 @@ def _pinbot_cfg() -> dict[str, str]:
     }
 
 
+def _whatsapp_delivery_failed(result: dict[str, Any] | None) -> bool:
+    if not result:
+        return True
+    if result.get("delivery_mode") == "whatsapp_sms_fallback":
+        return False
+    status = (result.get("status") or "").lower()
+    if status in ("sent", "queued", "awaited-dlr"):
+        return False
+    return status in ("failed", "skipped", "mocked", "unknown", "")
+
+
+async def mandatory_sms_fallback(
+    phone: str,
+    message: str,
+    *,
+    template_params: list[str] | None = None,
+    reason: str,
+    whatsapp_attempt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Mandatory SMS when WhatsApp cannot deliver (always used when SMS API is configured)."""
+    if not is_configured():
+        err = f"WhatsApp failed ({reason}) and SMS is not configured for fallback."
+        if whatsapp_attempt:
+            raise RuntimeError(err) from None
+        raise RuntimeError(err)
+
+    name = _recipient_name_for_demo(message, template_params)
+    logger.info("WhatsApp unavailable (%s); mandatory SMS fallback to %s", reason, phone)
+    result = await send_sms(phone, message, recipient_name=name)
+    result["channel"] = "sms"
+    result["delivery_mode"] = "whatsapp_sms_fallback"
+    result["whatsapp_fallback_reason"] = reason
+    if whatsapp_attempt:
+        result["whatsapp_attempt"] = whatsapp_attempt
+    if DEMO_SMS_MODE:
+        result["demo_sms_body"] = format_demo_sms(name)
+    return result
+
+
 async def send_whatsapp(
     to: str,
     message: str,
@@ -309,8 +384,8 @@ async def send_whatsapp(
         return {"status": "mocked", "channel": "whatsapp", "to": phone, "message": message}
 
     if not whatsapp_configured():
-        raise RuntimeError(
-            "WhatsApp is not configured. Set SPRINGEDGE_PHONE_NUMBER_ID and SPRINGEDGE_WABA_API_KEY."
+        return await mandatory_sms_fallback(
+            phone, message, template_params=template_params, reason="whatsapp_not_configured",
         )
 
     cfg = _pinbot_cfg()
@@ -336,6 +411,12 @@ async def send_whatsapp(
             result["message"] = message
             return result
         except Exception as e:
+            if is_configured():
+                return await mandatory_sms_fallback(
+                    phone, message, template_params=safe_params or params,
+                    reason=f"whatsapp_template_failed:{str(e)[:120]}",
+                    whatsapp_attempt={"error": str(e)[:300], "template": tname},
+                )
             if WHATSAPP_TEXT_FALLBACK and _is_template_send_error(e):
                 logger.warning(
                     "PinBot template §8 failed (%s); using text §1 to %s",
@@ -351,11 +432,20 @@ async def send_whatsapp(
             raise RuntimeError(_friendly_error(e)) from e
 
     body = _whatsapp_text_from_template_params(safe_params or params, message) if tname else sanitize_template_text(message, max_len=1000)
-    result = await send_text(phone, body, event_type=event_type, **cfg)
-    result["delivery_mode"] = "pinbot_text" if WHATSAPP_TEXT_ONLY else "pinbot_plain_text"
-    if tname:
-        result["template"] = tname
-    return result
+    try:
+        result = await send_text(phone, body, event_type=event_type, **cfg)
+        result["delivery_mode"] = "pinbot_text" if WHATSAPP_TEXT_ONLY else "pinbot_plain_text"
+        if tname:
+            result["template"] = tname
+        return result
+    except Exception as e:
+        if is_configured():
+            return await mandatory_sms_fallback(
+                phone, message, template_params=safe_params or params,
+                reason=f"whatsapp_text_failed:{str(e)[:120]}",
+                whatsapp_attempt={"error": str(e)[:300]},
+            )
+        raise RuntimeError(_friendly_error(e)) from e
 
 
 async def send_whatsapp_location(
@@ -373,13 +463,36 @@ async def send_whatsapp_location(
     phone = normalize_phone(to)
     if not phone:
         return {"status": "skipped", "reason": "invalid_phone", "to": to}
+
+    loc_label = sanitize_template_text(name or "Agent", max_len=80)
+    loc_area = sanitize_template_text(address or "", max_len=120)
+    sms_body = f"Live location: {loc_label}"
+    if loc_area:
+        sms_body += f" ({loc_area})"
+    sms_body += f". Lat {lat:.4f}, Lng {lng:.4f}."
+
     if not whatsapp_configured():
-        raise RuntimeError("WhatsApp is not configured.")
-    return await send_location(
-        phone, lat, lng,
-        name=name, address=address, event_type=event_type,
-        **_pinbot_cfg(),
-    )
+        return await mandatory_sms_fallback(
+            phone, sms_body, reason="whatsapp_location_not_configured",
+        )
+
+    try:
+        result = await send_location(
+            phone, lat, lng,
+            name=name, address=address, event_type=event_type,
+            **_pinbot_cfg(),
+        )
+        if _whatsapp_delivery_failed(result):
+            return await mandatory_sms_fallback(
+                phone, sms_body, reason="whatsapp_location_delivery_failed",
+                whatsapp_attempt=result,
+            )
+        return result
+    except Exception as e:
+        return await mandatory_sms_fallback(
+            phone, sms_body, reason=f"whatsapp_location_failed:{str(e)[:120]}",
+            whatsapp_attempt={"error": str(e)[:300]},
+        )
 
 
 async def pinbot_account_status() -> dict[str, Any] | None:
@@ -405,10 +518,19 @@ async def send_message(
 ) -> dict[str, Any]:
     ch = (channel or "sms").lower()
     if ch == "whatsapp":
-        return await send_whatsapp(
+        result = await send_whatsapp(
             to, message,
             template_name=template_name,
             template_params=template_params,
             event_type=event_type,
         )
+        if _whatsapp_delivery_failed(result) and is_configured():
+            return await mandatory_sms_fallback(
+                normalize_phone(to) or to,
+                message,
+                template_params=template_params,
+                reason="whatsapp_delivery_failed",
+                whatsapp_attempt=result,
+            )
+        return result
     return await send_sms(to, message)

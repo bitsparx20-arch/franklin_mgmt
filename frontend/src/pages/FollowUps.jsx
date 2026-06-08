@@ -46,9 +46,12 @@ export default function FollowUps() {
       toast.success(`Logged: ${action}`);
       if (action === "WhatsApp Sent" && data?.messaging) {
         const st = data.messaging.status;
+        const detail = data.messaging.detail || data.messaging;
+        const mode = detail?.delivery_mode || "";
         if (st === "mocked") toast.message("WhatsApp logged (add SPRINGEDGE_API_KEY to send live)");
-        else if (st === "failed" || st === "skipped") toast.error(data.messaging.error || data.messaging.reason || "Message not sent");
-        else toast.success("Sent via SpringEdge");
+        else if (mode === "whatsapp_sms_fallback") toast.success("WhatsApp unavailable — sent trial SMS instead");
+        else if (st === "failed" || st === "skipped") toast.error(detail?.error || data.messaging.error || data.messaging.reason || "Message not sent");
+        else toast.success(detail?.channel === "sms" ? "Sent via trial SMS" : "Sent via SpringEdge");
       }
       setOpen(false); setNotes("");
       load();
